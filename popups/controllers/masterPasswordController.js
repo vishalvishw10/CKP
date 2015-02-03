@@ -122,7 +122,8 @@ function MasterPasswordController($scope, $interval, $http, $routeParams, $locat
 	  $scope.clearMessages();
 	  $scope.busy = true;
 
-		keepass.getPasswords($scope.masterPassword, fileKey).then(function(entries) {
+		keepass.getPasswords($scope.masterPassword, fileKey).then(function(db) {
+			var entries = db.entries;
 
 	    //remember usage for next time:
       localStorage.saveCurrentDatabaseUsage({
@@ -189,7 +190,7 @@ function MasterPasswordController($scope, $interval, $http, $routeParams, $locat
 
 			bgMessages.postMessage({
 				entries: $scope.entries,
-				streamKey: Base64.encode(keepass.streamKey)
+				streamKey: Base64.encode(db.header.protectedStreamKey)
 			});  //save for a brief time in the background page
 
 	    $scope.busy = false;

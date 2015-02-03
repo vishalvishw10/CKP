@@ -31,22 +31,19 @@ function Keepass(pako, localStorage) {
 
   };
 
-  var internals = {
-  }
-
-  internals.littleEndian = (function() {
+  var littleEndian = (function() {
     var buffer = new ArrayBuffer(2);
     new DataView(buffer).setInt16(0, 256, true);
     return new Int16Array(buffer)[0] === 256;
   })();
 
   function readHeader(buf) {
-    var position = 12;  //after initial db signature + version
+    var position = 12; //after initial db signature + version
     var sigHeader = new DataView(buf, 0, position)
     var h = {
-      sig1 : sigHeader.getUint32(0, internals.littleEndian),
-      sig2 : sigHeader.getUint32(4, internals.littleEndian),
-      version : sigHeader.getUint32(8, internals.littleEndian)
+      sig1: sigHeader.getUint32(0, littleEndian),
+      sig2: sigHeader.getUint32(4, littleEndian),
+      version: sigHeader.getUint32(8, littleEndian)
     };
 
     var DBSIG_1 = 0x9AA2D903;
@@ -64,8 +61,8 @@ function Keepass(pako, localStorage) {
     var done = false;
     while (!done) {
       var descriptor = new DataView(buf, position, 3);
-      var fieldId = descriptor.getUint8(0, internals.littleEndian);
-      var len = descriptor.getUint16(1, internals.littleEndian);
+      var fieldId = descriptor.getUint8(0, littleEndian);
+      var len = descriptor.getUint16(1, littleEndian);
 
       var dv = new DataView(buf, position + 3, len);
       //console.log("fieldid " + fieldId + " found at " + position);
@@ -78,7 +75,7 @@ function Keepass(pako, localStorage) {
           h.cipher = new Uint8Array(buf, position, len);
           break;
         case 3: //compression flags, 4 bytes
-          h.compressionFlags = dv.getUint32(0, internals.littleEndian);
+          h.compressionFlags = dv.getUint32(0, littleEndian);
           break;
         case 4: //master seed
           h.masterSeed = new Uint8Array(buf, position, len);
@@ -87,8 +84,8 @@ function Keepass(pako, localStorage) {
           h.transformSeed = new Uint8Array(buf, position, len);
           break;
         case 6: //transform rounds, 8 bytes
-          h.keyRounds = dv.getUint32(0, internals.littleEndian);
-          h.keyRounds2 = dv.getUint32(4, internals.littleEndian);
+          h.keyRounds = dv.getUint32(0, littleEndian);
+          h.keyRounds2 = dv.getUint32(4, littleEndian);
           break;
         case 7: //iv
           h.iv = new Uint8Array(buf, position, len);
@@ -100,7 +97,7 @@ function Keepass(pako, localStorage) {
           h.streamStartBytes = new Uint8Array(buf, position, len);
           break;
         case 10:
-          h.innerRandomStreamId = dv.getUint32(0, internals.littleEndian);
+          h.innerRandomStreamId = dv.getUint32(0, littleEndian);
           break;
         default:
           break;
@@ -119,9 +116,9 @@ function Keepass(pako, localStorage) {
     try {
       var arr = [];
       for (var i = 0; i < hex.length; i += 2)
-          arr.push(parseInt(hex.substr(i, 2), 16));
+        arr.push(parseInt(hex.substr(i, 2), 16));
       return arr;
-    } catch(err) {
+    } catch (err) {
       return [];
     }
   }
@@ -170,7 +167,7 @@ function Keepass(pako, localStorage) {
       name: "SHA-256"
     };
 
-    if (masterPassword) {
+    if (masterPassword || !fileKey) { //if no file key then always process password, even a blank one
       var encoder = new TextEncoder();
       var masterKey = encoder.encode(masterPassword);
 
@@ -184,13 +181,17 @@ function Keepass(pako, localStorage) {
 
     return Promise.all(partPromises).then(function(parts) {
       var compositeKeySource = new Uint8Array(32 * parts.length);
-      for(var i=0; i<parts.length; i++) {
-        compositeKeySource.set(new Uint8Array(parts[i]), i*32);
+      for (var i = 0; i < parts.length; i++) {
+        compositeKeySource.set(new Uint8Array(parts[i]), i * 32);
       }
 
       return window.crypto.subtle.digest(SHA, compositeKeySource);
     });
   }
+
+  my.savePasswords = function(compositeKey, xml, header) {
+
+  };
 
   my.getPasswords = function(masterPassword, fileKey) {
     return localStorage.getSavedDatabaseChoice().then(function(fileStore) {
@@ -201,7 +202,8 @@ function Keepass(pako, localStorage) {
     }).then(function(buf) {
       var h = readHeader(buf);
       if (!h) throw new Error('Failed to read file header');
-      if (h.innerRandomStreamId != 2) throw new Error('Invalid Stream Key - Salsa20 is supported by this implementation, Arc4 and others not implemented.')
+      if (h.innerRandomStreamId != 2) throw new Error('Invalid Stream Key - Salsa20 is supported by this implementation, Arc4 and others not implemented.');
+      if (h.keyRounds2 > 0) throw new Error("Sorry, we don't support extra large key rounds.  Use KeePass to reduce it below 2,147,483,647");
 
       var encData = new Uint8Array(buf, h.dataStart);
       //console.log("read file header ok.  encrypted data starts at byte " + h.dataStart);
@@ -220,7 +222,9 @@ function Keepass(pako, localStorage) {
         return aes_ecb_encrypt(h.transformSeed, masterKey, h.keyRounds);
       }).then(function(finalVal) {
         //do a final SHA-256 on the transformed key
-        return window.crypto.subtle.digest({name: "SHA-256"}, finalVal);
+        return window.crypto.subtle.digest({
+          name: "SHA-256"
+        }, finalVal);
       }).then(function(encMasterKey) {
         var finalKeySource = new Uint8Array(64);
         finalKeySource.set(h.masterSeed);
@@ -234,7 +238,7 @@ function Keepass(pako, localStorage) {
       }).then(function(decryptedData) {
         //at this point we probably have successfully decrypted data, just need to double-check:
         var storedStartBytes = new Uint8Array(decryptedData, 0, 32);
-        for (var i=0; i<32; i++) {
+        for (var i = 0; i < 32; i++) {
           if (storedStartBytes[i] != h.streamStartBytes[i]) {
             throw new Error('Decryption succeeded but payload corrupt');
             return;
@@ -243,21 +247,23 @@ function Keepass(pako, localStorage) {
 
         //ok, data decrypted, lets start parsing:
         var blockHeader = new DataView(decryptedData, 32, 40);
-        var blockId = blockHeader.getUint32(0, internals.littleEndian);
-        var blockSize = blockHeader.getUint32(36, internals.littleEndian);
+        var blockId = blockHeader.getUint32(0, littleEndian);
+        var blockSize = blockHeader.getUint32(36, littleEndian);
         var blockHash = new Uint8Array(decryptedData, 36, 32);
 
         var block = new Uint8Array(decryptedData, 72, blockSize);
-        if (h.compressionFlags == 1) {
+        if (h.compressionFlags == 1)
           block = pako.inflate(block);
-        }
 
         var decoder = new TextDecoder();
         var xml = decoder.decode(block);
 
-        var entries = parseXml(xml, h.protectedStreamKey);
-
-        return entries;
+        var entries = parseXml(xml);
+        return {
+          "entries": entries,
+          "header": h,
+          "xml": xml
+        };
       });
     });
   }
@@ -267,84 +273,82 @@ function Keepass(pako, localStorage) {
    */
   function getDecryptedEntry(protectedData, streamKey) {
     var iv = [0xE8, 0x30, 0x09, 0x4B, 0x97, 0x20, 0x5D, 0x2A];
-    var salsa = new Salsa20(new Uint8Array(streamKey || my.streamKey), iv);
+    var salsa = new Salsa20(new Uint8Array(streamKey), iv);
     var decoder = new TextDecoder();
 
     salsa.getBytes(protectedData.position);
     var decryptedBytes = new Uint8Array(salsa.decrypt(protectedData.data));
     return decoder.decode(decryptedBytes);
   }
-  my.getDecryptedEntry = getDecryptedEntry;  //expose the function
+  my.getDecryptedEntry = getDecryptedEntry; //expose the function
 
   /**
    * Parses the entries xml into an object format
    **/
-  function parseXml(xml, protectedStreamKey) {
-    return window.crypto.subtle.digest({name: "SHA-256"}, protectedStreamKey).then(function(streamKey) {
-      my.streamKey = streamKey;
-      var decoder = new TextDecoder();
-      var parser = new DOMParser();
-      var doc = parser.parseFromString(xml, "text/xml");
-      //console.log(doc);
+  function parseXml(xml) {
+    var decoder = new TextDecoder();
+    var parser = new DOMParser();
+    var doc = parser.parseFromString(xml, "text/xml");
+    //console.log(doc);
 
-/*
-
-      var protectedNodes = doc.evaluate("//Value[@Protected='True']", doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-      for (var i=0 ; i < protectedNodes.snapshotLength; i++) {
-        var protectedNode = protectedNodes.snapshotItem(i);
-        var val = protectedNode.textContent;
-        var encBytes = StringView.base64ToBytes(val);
-        var base64val = StringView.bytesToBase64(salsa.decrypt(encBytes));
-        var finalVal = atob(base64val);
-      }
-*/
-
-      var results = [];
-      var entryNodes = doc.evaluate('//Entry', doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-      var protectedPosition = 0;
-      for (var i=0 ; i < entryNodes.snapshotLength; i++) {
-        var entryNode = entryNodes.snapshotItem(i);
-        //console.log(entryNode);
-        var entry = { protectedData: {}};
-
-        //exclude histories and recycle bin:
-        if (entryNode.parentNode.nodeName != "History") {
-          for (var m=0; m < entryNode.parentNode.children.length; m++) {
-            var groupNode = entryNode.parentNode.children[m];
-            if (groupNode.nodeName == 'Name')
-              entry.groupName = groupNode.textContent;
+    /*
+          var protectedNodes = doc.evaluate("//Value[@Protected='True']", doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          for (var i=0 ; i < protectedNodes.snapshotLength; i++) {
+            var protectedNode = protectedNodes.snapshotItem(i);
+            var val = protectedNode.textContent;
+            var encBytes = StringView.base64ToBytes(val);
+            var base64val = StringView.bytesToBase64(salsa.decrypt(encBytes));
+            var finalVal = atob(base64val);
           }
+    */
 
-          if (entry.groupName != "Recycle Bin")
-            results.push(entry);
+    var results = [];
+    var entryNodes = doc.evaluate('//Entry', doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+    var protectedPosition = 0;
+    for (var i = 0; i < entryNodes.snapshotLength; i++) {
+      var entryNode = entryNodes.snapshotItem(i);
+      //console.log(entryNode);
+      var entry = {
+        protectedData: {}
+      };
+
+      //exclude histories and recycle bin:
+      if (entryNode.parentNode.nodeName != "History") {
+        for (var m = 0; m < entryNode.parentNode.children.length; m++) {
+          var groupNode = entryNode.parentNode.children[m];
+          if (groupNode.nodeName == 'Name')
+            entry.groupName = groupNode.textContent;
         }
-        for (var j=0; j < entryNode.children.length; j++) {
-          var childNode = entryNode.children[j];
 
-          if (childNode.nodeName == "String") {
-            var key = childNode.getElementsByTagName('Key')[0].textContent;
-            var valNode = childNode.getElementsByTagName('Value')[0];
-            var val = valNode.textContent;
-            var protectedVal = valNode.hasAttribute('Protected');
+        if (entry.groupName != "Recycle Bin")
+          results.push(entry);
+      }
+      for (var j = 0; j < entryNode.children.length; j++) {
+        var childNode = entryNode.children[j];
 
-            if (protectedVal) {
-              var encBytes = StringView.base64ToBytes(val);
-              entry.protectedData[key] = {
-                position: protectedPosition,
-                data: encBytes
-              };
+        if (childNode.nodeName == "String") {
+          var key = childNode.getElementsByTagName('Key')[0].textContent;
+          var valNode = childNode.getElementsByTagName('Value')[0];
+          var val = valNode.textContent;
+          var protectedVal = valNode.hasAttribute('Protected');
 
-              protectedPosition += encBytes.length;
-              //val = atob(StringView.bytesToBase64(salsa.decrypt(encBytes)));
-            }
-            entry[key] = val;
+          if (protectedVal) {
+            var encBytes = StringView.base64ToBytes(val);
+            entry.protectedData[key] = {
+              position: protectedPosition,
+              data: encBytes
+            };
+
+            protectedPosition += encBytes.length;
+            //val = atob(StringView.bytesToBase64(salsa.decrypt(encBytes)));
           }
+          entry[key] = val;
         }
       }
+    }
 
-      //console.log(results);
-      return results;
-    });
+    //console.log(results);
+    return results;
   }
 
   function aes_ecb_encrypt(rawKey, data, rounds) {
@@ -352,12 +356,12 @@ function Keepass(pako, localStorage) {
     //Simulate ECB encryption by using IV of the data.
     var blockCount = data.byteLength / 16;
     var blockPromises = new Array(blockCount);
-    for(var i=0; i<blockCount; i++) {
+    for (var i = 0; i < blockCount; i++) {
       var block = data.subarray(i * 16, i * 16 + 16);
       blockPromises[i] = (function(iv) {
         var AES = {
           name: "AES-CBC",
-            iv: iv
+          iv: iv
         };
         return window.crypto.subtle.importKey("raw", rawKey, AES, false, ["encrypt"]).then(function(secureKey) {
           var fakeData = new Uint8Array(rounds * 16);
@@ -370,7 +374,7 @@ function Keepass(pako, localStorage) {
     return Promise.all(blockPromises).then(function(blocks) {
       //we now have the blocks, so chain them back together
       var result = new Uint8Array(data.byteLength);
-      for (var i=0; i<blockCount; i++) {
+      for (var i = 0; i < blockCount; i++) {
         result.set(blocks[i], i * 16);
       }
       return result;
