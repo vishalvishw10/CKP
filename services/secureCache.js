@@ -41,14 +41,25 @@ function SecureCache(protectedMemory) {
     iv: new Uint8Array([0x18, 0x37, 0xC9, 0x4C, 0x1F, 0x42, 0x61, 0x73, 0x92, 0x5A, 0x1D, 0xC3, 0x44, 0x0A, 0x24, 0x40])
   };
 
+  var PBKDF2 = {
+    name: "PBKDF2",
+    salt: new Uint8Array([0x18, 0x37, 0xC9, 0x4C, 0x1F, 0x42, 0x61, 0x73, 0x92, 0x5A, 0x1D, 0xC3, 0x44, 0x0A, 0x24, 0x40]),
+    iterations: 4096,
+    hash: "SHA-1"
+  };
+
   var tokenPromise = new Promise(function(resolve, reject) {
     chrome.identity.getAuthToken({interactive: false}, function(token) {
       if (token) {
         var encoder = new TextEncoder();
         var tokenBytes = encoder.encode(token);
+
         window.crypto.subtle.digest({name: 'SHA-256'}, tokenBytes).then(function(hash) {
-          return window.crypto.subtle.importKey("raw", hash, AES, false, ['encrypt', 'decrypt']);
+          return window.crypto.subtle.importKey("raw", hash, PBKDF2, false, ['deriveKey', 'deriveBits']);
+        }).then(function(key1) {
+          return window.crypto.subtle.deriveKey(PBKDF2, key1, AES, false, ['encrypt', 'decrypt']);
         }).then(function(aesKey) {
+          //return window.crypto.subtle.importKey("raw", hash, AES, false, ['encrypt', 'decrypt']);
           resolve(aesKey);
         });
       } else {
