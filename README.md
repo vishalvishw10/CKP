@@ -1,3 +1,7 @@
+# No longer maintained
+
+This repo and the CPK app are no longer maintained.  Consider using https://github.com/subdavis/Tusk instead.
+
 # CKP
 Chrome extension for interacting with KeePass password file. Web Store url is https://chrome.google.com/webstore/detail/lnfepbjehgokldcaljagbmchhnaaogpc.   Give it a try!
 
