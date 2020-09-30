@@ -3,7 +3,7 @@
 This repo and the CPK app are no longer maintained.  Consider using https://github.com/subdavis/Tusk instead.
 
 # CKP
-Chrome extension for interacting with KeePass password file. Web Store url is https://chrome.google.com/webstore/detail/lnfepbjehgokldcaljagbmchhnaaogpc.   Give it a try!
+Chrome extension for interacting with the KeePass password file. Web Store URL is https://chrome.google.com/webstore/detail/lnfepbjehgokldcaljagbmchhnaaogpc.   Give it a try!
 
 More info available at http://perfectapi.github.io/CKP/
 
@@ -12,7 +12,7 @@ If you want to hack on the code...
 
 Tools needed:
 * [Node.Js](http://nodejs.org/) - prerequisite for other dev tools
-* [Grunt.js](gruntjs.com) - for less/css processing, packaging, and copying libs to the lib folder
+* [Grunt.js](gruntjs.com) - for less/CSS processing, packaging, and copying libs to the lib folder
 * [Bower](http://bower.io/) - for dependencies (libraries)
 
 1) Clone the codebase 
